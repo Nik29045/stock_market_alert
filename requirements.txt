@@ -1,0 +1,3 @@
+tinkoff-invest
+python-telegram-bot
+python-dotenv
