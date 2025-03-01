@@ -1,11 +1,12 @@
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from os import getenv
 from dotenv import load_dotenv
 from tinkoff.invest import Client, CandleInterval
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+from datetime import datetime, timezone
 
 # Загрузка переменных окружения из .env
 load_dotenv()
@@ -26,7 +27,7 @@ user_chat_ids = set()
 def get_last_price(client, figi):
     candles = client.get_all_candles(
         figi=figi,
-        from_=datetime.utcnow() - timedelta(minutes=5),
+        from_=datetime.now(timezone.utc) - timedelta(minutes=5),
         interval=INTERVAL,
     )
     prices = [candle.close.units + candle.close.nano / 1e9 for candle in candles]
@@ -62,8 +63,13 @@ async def check_price_spikes(context: ContextTypes.DEFAULT_TYPE):
                         f"Новая цена: {current_price:.2f}\n"
                         f"Изменение: {price_change_percent:.2f}%"
                     )
-                    await bot.send_message(chat_id=CHAT_ID, text=message)
                     logging.info(f"Отправлено уведомление: {message}")
+                    # Отправляем сообщение всем пользователям
+                    for chat_id in user_chat_ids:
+                        try:
+                            await context.bot.send_message(chat_id=chat_id, text=message)
+                        except Exception as e:
+                            logging.error(f"Ошибка при отправке сообщения в чат {chat_id}: {e}")
 
             previous_price = current_price
             await asyncio.sleep(60)  # Проверяем каждую минуту
@@ -77,7 +83,10 @@ def main():
     application.add_handler(CommandHandler("start", start))
 
     # Запускаем задачу для проверки скачков цен
-    application.job_queue.run_repeating(check_price_spikes, interval=60, first=0)
+    if application.job_queue:
+        application.job_queue.run_repeating(check_price_spikes, interval=60, first=0)
+    else:
+        logging.error("JobQueue не настроен. Убедитесь, что установлены все зависимости.")
 
     # Запускаем бота
     application.run_polling()
